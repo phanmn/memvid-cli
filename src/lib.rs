@@ -15,6 +15,7 @@ pub mod mistral_embeddings;
 pub mod nvidia_embeddings;
 pub mod openai_embeddings;
 pub mod openai_reranker;
+pub mod openrouter_embeddings;
 pub mod org_ticket_cache;
 pub mod ticket_cache;
 pub mod utils;

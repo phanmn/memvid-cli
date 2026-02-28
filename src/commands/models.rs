@@ -435,6 +435,34 @@ const EXTERNAL_EMBEDDING_PROVIDERS: &[ExternalEmbeddingProvider] = &[
         env_var: "OPENAI_API_KEY",
     },
     ExternalEmbeddingProvider {
+        name: "OpenRouter",
+        models: &[
+            ("google/text-embedding-004", 768, "Default"),
+            ("amazon/amazon-embeddings", 1024, "Amazon"),
+            ("cohere/embed-english-v3.0", 1024, "Cohere English"),
+            (
+                "cohere/embed-multilingual-v3.0",
+                1024,
+                "Cohere Multilingual",
+            ),
+            ("openai/text-embedding-3-small", 1536, "OpenAI Small"),
+            ("openai/text-embedding-3-large", 3072, "OpenAI Large"),
+            ("mistral/mistral-embed", 1024, "Mistral"),
+            ("nvidia/nv-embed-v1", 4096, "NVIDIA"),
+        ],
+        env_var: "OPENROUTER_API_KEY",
+    },
+    ExternalEmbeddingProvider {
+        name: "Google Gemini",
+        models: &[("text-embedding-004", 768, "Default")],
+        env_var: "GEMINI_API_KEY",
+    },
+    ExternalEmbeddingProvider {
+        name: "NVIDIA",
+        models: &[("nvidia/nv-embed-v1", 4096, "Default")],
+        env_var: "NVIDIA_API_KEY",
+    },
+    ExternalEmbeddingProvider {
         name: "Cohere",
         models: &[
             ("embed-english-v3.0", 1024, "English"),

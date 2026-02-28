@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{anyhow, Result};
 use ed25519_dalek::VerifyingKey;
+use memvid_core::EmbeddingProvider;
 
 const DEFAULT_API_URL: &str = "https://memvid.com";
 const DEFAULT_CACHE_DIR: &str = "~/.cache/memvid";
@@ -38,6 +39,8 @@ pub enum EmbeddingModelChoice {
     Gemini,
     /// Mistral mistral-embed: Mistral AI embeddings, 1024-dim (requires MISTRAL_API_KEY)
     Mistral,
+    /// OpenRouter embeddings: Access 100+ embedding models via OpenRouter API (requires OPENROUTER_API_KEY)
+    OpenRouter,
 }
 
 impl EmbeddingModelChoice {
@@ -61,6 +64,7 @@ impl EmbeddingModelChoice {
                 | EmbeddingModelChoice::Nvidia
                 | EmbeddingModelChoice::Gemini
                 | EmbeddingModelChoice::Mistral
+                | EmbeddingModelChoice::OpenRouter
         )
     }
 
@@ -89,6 +93,9 @@ impl EmbeddingModelChoice {
             EmbeddingModelChoice::Mistral => {
                 panic!("Mistral embeddings don't use fastembed. Check is_remote() first.")
             }
+            EmbeddingModelChoice::OpenRouter => {
+                panic!("OpenRouter embeddings don't use fastembed. Check is_remote() first.")
+            }
         }
     }
 
@@ -105,6 +112,7 @@ impl EmbeddingModelChoice {
             EmbeddingModelChoice::Nvidia => "nvidia",
             EmbeddingModelChoice::Gemini => "gemini",
             EmbeddingModelChoice::Mistral => "mistral",
+            EmbeddingModelChoice::OpenRouter => "openrouter",
         }
     }
 
@@ -125,6 +133,7 @@ impl EmbeddingModelChoice {
             EmbeddingModelChoice::Nvidia => "nvidia/nv-embed-v1",
             EmbeddingModelChoice::Gemini => "text-embedding-004",
             EmbeddingModelChoice::Mistral => "mistral-embed",
+            EmbeddingModelChoice::OpenRouter => "openrouter",
         }
     }
 
@@ -142,6 +151,8 @@ impl EmbeddingModelChoice {
             EmbeddingModelChoice::Nvidia => 0,
             EmbeddingModelChoice::Gemini => 768,
             EmbeddingModelChoice::Mistral => 1024,
+            // OpenRouter - dimension depends on model, infer from first response
+            EmbeddingModelChoice::OpenRouter => 0,
         }
     }
 }
@@ -186,8 +197,13 @@ impl FromStr for EmbeddingModelChoice {
             _ if lowered.starts_with("mistral/") || lowered.starts_with("mistral:") => {
                 Ok(EmbeddingModelChoice::Mistral)
             }
+            // OpenRouter embeddings
+            "openrouter" | "openrouter-embed" => Ok(EmbeddingModelChoice::OpenRouter),
+            _ if lowered.starts_with("openrouter/") || lowered.starts_with("openrouter:") => {
+                Ok(EmbeddingModelChoice::OpenRouter)
+            }
             _ => Err(anyhow!(
-                "unknown embedding model '{}'. Valid options: bge-small, bge-base, nomic, gte-large, openai, openai-small, openai-ada, nvidia, gemini, mistral",
+                "unknown embedding model '{}'. Valid options: bge-small, bge-base, nomic, gte-large, openai, openai-small, openai-ada, nvidia, gemini, mistral, openrouter",
                 s
             )),
         }
@@ -621,6 +637,7 @@ use crate::gemini_embeddings::GeminiEmbeddingProvider;
 use crate::mistral_embeddings::MistralEmbeddingProvider;
 use crate::nvidia_embeddings::NvidiaEmbeddingProvider;
 use crate::openai_embeddings::OpenAIEmbeddingProvider;
+use crate::openrouter_embeddings::OpenRouterEmbeddingProvider;
 
 /// Internal embedding backend - local fastembed or remote providers.
 #[derive(Clone)]
@@ -631,6 +648,7 @@ enum EmbeddingBackend {
     Nvidia(std::sync::Arc<NvidiaEmbeddingProvider>),
     Gemini(std::sync::Arc<GeminiEmbeddingProvider>),
     Mistral(std::sync::Arc<MistralEmbeddingProvider>),
+    OpenRouter(std::sync::Arc<OpenRouterEmbeddingProvider>),
 }
 
 /// Embedding runtime wrapper supporting local and remote embeddings
@@ -701,6 +719,18 @@ impl EmbeddingRuntime {
         }
     }
 
+    fn new_openrouter(
+        provider: OpenRouterEmbeddingProvider,
+        model: EmbeddingModelChoice,
+        dimension: usize,
+    ) -> Self {
+        Self {
+            backend: EmbeddingBackend::OpenRouter(std::sync::Arc::new(provider)),
+            model,
+            dimension: std::sync::Arc::new(AtomicUsize::new(dimension)),
+        }
+    }
+
     const MAX_OPENAI_EMBEDDING_TEXT_LEN: usize = 20_000;
     // NVIDIA Integrate embeddings enforce a 4096 token limit; use a tighter char cap as a guardrail.
     const MAX_NVIDIA_EMBEDDING_TEXT_LEN: usize = 12_000;
@@ -709,6 +739,8 @@ impl EmbeddingRuntime {
     const MAX_GEMINI_EMBEDDING_TEXT_LEN: usize = 20_000;
     // Mistral has an 8192 token limit, using conservative estimate
     const MAX_MISTRAL_EMBEDDING_TEXT_LEN: usize = 20_000;
+    // OpenRouter uses variable limits depending on model, using conservative estimate
+    const MAX_OPENROUTER_EMBEDDING_TEXT_LEN: usize = 20_000;
 
     fn max_remote_embedding_chars(&self) -> usize {
         match &self.backend {
@@ -716,6 +748,7 @@ impl EmbeddingRuntime {
             EmbeddingBackend::Nvidia(_) => Self::MAX_NVIDIA_EMBEDDING_TEXT_LEN,
             EmbeddingBackend::Gemini(_) => Self::MAX_GEMINI_EMBEDDING_TEXT_LEN,
             EmbeddingBackend::Mistral(_) => Self::MAX_MISTRAL_EMBEDDING_TEXT_LEN,
+            EmbeddingBackend::OpenRouter(_) => Self::MAX_OPENROUTER_EMBEDDING_TEXT_LEN,
             #[cfg(feature = "local-embeddings")]
             EmbeddingBackend::FastEmbed(_) => usize::MAX,
         }
@@ -768,7 +801,8 @@ impl EmbeddingRuntime {
             EmbeddingBackend::OpenAI(_)
             | EmbeddingBackend::Nvidia(_)
             | EmbeddingBackend::Gemini(_)
-            | EmbeddingBackend::Mistral(_) => {
+            | EmbeddingBackend::Mistral(_)
+            | EmbeddingBackend::OpenRouter(_) => {
                 Self::truncate_for_embedding(text, self.max_remote_embedding_chars())
             }
             #[cfg(feature = "local-embeddings")]
@@ -807,6 +841,9 @@ impl EmbeddingRuntime {
             EmbeddingBackend::Mistral(provider) => provider
                 .embed_text(&text)
                 .map_err(|err| anyhow!("failed to compute embedding with Mistral: {err}"))?,
+            EmbeddingBackend::OpenRouter(provider) => provider
+                .embed_text(&text)
+                .map_err(|err| anyhow!("failed to compute embedding with OpenRouter: {}", err))?,
         };
 
         self.note_dimension(embedding.len())?;
@@ -866,7 +903,10 @@ impl EmbeddingRuntime {
                 .map_err(|err| anyhow!("failed to compute embeddings with Gemini: {err}"))?,
             EmbeddingBackend::Mistral(provider) => provider
                 .embed_batch(&truncated_refs)
-                .map_err(|err| anyhow!("failed to compute embeddings with Mistral: {err}"))?,
+                .map_err(|err| anyhow!("failed to compute embeddings with Mistral: {}", err))?,
+            EmbeddingBackend::OpenRouter(provider) => provider
+                .embed_batch(&truncated_refs)
+                .map_err(|err| anyhow!("failed to compute embeddings with OpenRouter: {}", err))?,
         };
 
         if let Some(first) = embeddings.first() {
@@ -931,6 +971,7 @@ impl EmbeddingRuntime {
             EmbeddingBackend::Nvidia(_) => "nvidia",
             EmbeddingBackend::Gemini(_) => "gemini",
             EmbeddingBackend::Mistral(_) => "mistral",
+            EmbeddingBackend::OpenRouter(_) => "openrouter",
         }
     }
 
@@ -945,6 +986,7 @@ impl EmbeddingRuntime {
             EmbeddingBackend::Nvidia(provider) => provider.model().to_string(),
             EmbeddingBackend::Gemini(provider) => provider.model().to_string(),
             EmbeddingBackend::Mistral(provider) => provider.model().to_string(),
+            EmbeddingBackend::OpenRouter(provider) => provider.model().to_string(),
         }
     }
 }
@@ -986,7 +1028,8 @@ fn model_size_mb(model: EmbeddingModelChoice) -> usize {
         | EmbeddingModelChoice::OpenAIAda
         | EmbeddingModelChoice::Nvidia
         | EmbeddingModelChoice::Gemini
-        | EmbeddingModelChoice::Mistral => 0,
+        | EmbeddingModelChoice::Mistral
+        | EmbeddingModelChoice::OpenRouter => 0,
     }
 }
 
@@ -1029,6 +1072,10 @@ fn instantiate_embedding_runtime(config: &CliConfig) -> Result<EmbeddingRuntime>
         return instantiate_mistral_runtime();
     }
 
+    if embedding_model == EmbeddingModelChoice::OpenRouter {
+        return instantiate_openrouter_runtime();
+    }
+
     // Local fastembed model
     #[cfg(feature = "local-embeddings")]
     {
@@ -1043,7 +1090,8 @@ fn instantiate_embedding_runtime(config: &CliConfig) -> Result<EmbeddingRuntime>
             - Set OPENAI_API_KEY and use --embedding-model openai-large\n\
             - Set GEMINI_API_KEY and use --embedding-model gemini\n\
             - Set MISTRAL_API_KEY and use --embedding-model mistral\n\
-            - Set NVIDIA_API_KEY and use --embedding-model nvidia"
+            - Set NVIDIA_API_KEY and use --embedding-model nvidia\n\
+            - Set OPENROUTER_API_KEY and use --embedding-model openrouter"
         );
     }
 }
@@ -1173,6 +1221,28 @@ fn instantiate_mistral_runtime() -> Result<EmbeddingRuntime> {
     Ok(EmbeddingRuntime::new_mistral(
         provider,
         EmbeddingModelChoice::Mistral,
+        dimension,
+    ))
+}
+
+/// Instantiate OpenRouter embedding runtime
+fn instantiate_openrouter_runtime() -> Result<EmbeddingRuntime> {
+    use memvid_core::EmbeddingProvider;
+    use tracing::info;
+
+    let provider = OpenRouterEmbeddingProvider::from_env()
+        .map_err(|err| anyhow!("failed to create OpenRouter embedding provider: {}", err))?;
+
+    let dimension = provider.dimension();
+    info!(
+        "OpenRouter embedding provider ready: model={}, dimension={}",
+        provider.model(),
+        dimension
+    );
+
+    Ok(EmbeddingRuntime::new_openrouter(
+        provider,
+        EmbeddingModelChoice::OpenRouter,
         dimension,
     ))
 }
