@@ -1,0 +1,154 @@
+[package]
+name = "memvid-cli"
+version = "2.0.137"
+edition = "2021"
+rust-version = "1.85.0"
+license = "Apache-2.0"
+description = "Command-line interface for Memvid v2 - AI memory with crash-safe, single-file storage"
+repository = "https://github.com/memvid/memvid"
+documentation = "https://docs.memvid.com"
+readme = "README.md"
+keywords = ["ai", "memory", "cli", "search", "embeddings"]
+categories = ["command-line-utilities", "database"]
+exclude = ["web/node_modules/", "web/src/", "web/public/", "tests/", "examples/", "target/"]
+
+[features]
+# Note: "web" feature excluded from defaults - requires web/dist build artifacts not available on crates.io
+# Enable with --features web when building from source after running: cd web && pnpm install && pnpm build
+default = ["temporal_track", "temporal_enrich", "parallel_segments", "candle-llm", "llama-cpp", "clip", "logic_mesh", "whisper", "replay", "encryption", "local-embeddings", "vec"]
+# Web UI for session replay Time Machine (requires building web/dist first)
+web = ["dep:axum", "dep:tower-http", "dep:tokio-tungstenite", "dep:futures-util", "dep:rust-embed", "dep:mime_guess"]
+# Local embeddings via fastembed/ONNX Runtime - disabled on Windows due to CRT conflicts
+# Without this feature, users must use remote embedding APIs (OpenAI, Gemini, NVIDIA, Mistral)
+local-embeddings = ["dep:fastembed"]
+# Vector search via ONNX Runtime - disabled on Windows due to CRT conflicts (ort vs tokenizers)
+vec = ["memvid-core/vec"]
+temporal_track = ["memvid-core/temporal_track"]
+# Time-travel replay for agent session recording and debugging
+replay = ["memvid-core/replay"]
+temporal_enrich = ["memvid-core/temporal_enrich"]
+parallel_segments = ["memvid-core/parallel_segments"]
+# Password-based encryption capsules (.mv2e)
+encryption = ["memvid-core/encryption"]
+# CLIP visual embeddings for image/PDF page search
+clip = ["memvid-core/clip"]
+pdfium = ["memvid-core/pdfium"]
+# Logic-Mesh: entity-relationship graph with NER extraction
+logic_mesh = ["memvid-core/logic_mesh"]
+# Whisper audio transcription - now fully in memvid-core with Candle inference
+whisper = ["memvid-core/whisper"]
+# Candle LLM for Phi-3 text enrichment (separate from Whisper)
+candle-llm = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:hf-hub"]
+# GPU acceleration - affects both CLI's Phi-3 and core's Whisper
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal", "memvid-core/metal"]
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "memvid-core/cuda"]
+accelerate = ["candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate", "memvid-core/accelerate"]
+# llama.cpp backend - optional, disabled by default for Docker builds
+# Uses gemm which requires ARM FP16 SIMD (fullfp16) instructions not available in Docker ARM emulation
+# Also requires LLVM/libclang which is hard to get on Windows ARM
+llama-cpp = ["dep:llama_cpp", "memvid-ask-model/llama-cpp"]
+# Audio playback via rodio/cpal - works on macOS (CoreAudio), Linux (ALSA), and Windows (WASAPI)
+# Linux requires libasound2-dev at build time and libasound2 at runtime
+audio-playback = ["dep:rodio"]
+# Document extraction via extractous (PDF, DOCX, etc.) - requires GraalVM native compilation
+# Disabled by default for Windows ARM and WSL2 on ARM (tika_native doesn't support these platforms)
+# Without this feature, `memvid put` for PDFs/DOCX will fail but find/stats/view/ask still work
+extractous = ["memvid-core/extractous"]
+
+[dependencies]
+anyhow = "1.0.89"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5.18", features = ["derive", "wrap_help"] }
+colored = "2.1"
+colored_json = "5.0"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter"] }
+serde_json = "1.0.117"
+# Workspace-relative paths
+# Note: vec feature NOT hardcoded here - it's added via the 'vec' feature flag
+# (vec pulls in ort+tokenizers which have CRT conflicts on Windows)
+memvid-core = { version = "2.0.137", path = "../memvid-core", default-features = false, features = ["lex", "pdf_extract"] }
+memvid-ask-model = { version = "2.0.137", path = "../memvid-ask-model", default-features = false }
+blake3 = "1.5.1"
+uuid = { version = "1.10.0", features = ["v4"] }
+glob = "0.3.3"
+zstd = "0.13.3"
+infer = "0.19.0"
+image = { version = "0.25.8", default-features = false, features = ["png", "jpeg", "gif", "bmp", "ico", "tiff", "webp"] }
+color-thief = "0.2.2"
+exif = { package = "kamadak-exif", version = "0.6.1" }
+pathdiff = "0.2.3"
+pdf-extract = "0.10"
+# Pure Rust PDF text extraction fallback (works on all platforms without native deps)
+lopdf = "0.38"
+# Use rustls for TLS to avoid OpenSSL cross-compilation issues
+reqwest = { version = "0.11.27", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+serde = { version = "1.0.117", features = ["derive"] }
+base64 = "0.21.7"
+ed25519-dalek = { version = "2.2.0", features = ["std"] }
+hex = "0.4.3"
+which = "4.4"
+indicatif = "0.17.8"
+open = "5.3.2"
+tempfile = "3.10.1"
+lofty = "0.17"
+symphonia = { version = "0.5.3", default-features = false, features = ["aac", "mp3", "flac", "isomp4", "ogg", "wav", "pcm"] }
+tree_magic_mini = "3.0"
+time = { version = "0.3.36", features = ["macros", "parsing"] }
+tokio = { version = "1.47.1", features = ["rt", "rt-multi-thread", "net", "sync"] }
+
+# Web server for Time Machine UI
+axum = { version = "0.7", features = ["ws"], optional = true }
+tower-http = { version = "0.5", features = ["fs", "cors"], optional = true }
+tokio-tungstenite = { version = "0.21", optional = true }
+futures-util = { version = "0.3", optional = true }
+rust-embed = { version = "8.2", optional = true }
+mime_guess = { version = "2.0", optional = true }
+
+# llama.cpp backend - optional, requires gemm with ARM FP16 SIMD (fullfp16)
+# This doesn't compile in Docker ARM emulation, so it's feature-gated
+llama_cpp = { version = "0.3.2", optional = true }
+
+# Candle ML framework for Phi-3 support
+candle-core = { version = "0.9", optional = true }
+candle-nn = { version = "0.9", optional = true }
+candle-transformers = { version = "0.9", optional = true }
+tokenizers = { version = "0.20", optional = true }
+hf-hub = { version = "0.4", optional = true, features = ["tokio"] }
+jsonpath_lib = "0.3"
+libc = "0.2"
+byteorder = "1.5"
+hostname = "0.4.1"
+log = "0.4.28"
+rayon = "1.11"
+whoami = "1.5"
+dirs = "5.0"
+sha2 = "0.10"
+toml = "0.8"
+
+# Audio playback - optional, NOT in defaults due to platform-specific build requirements
+# Enable with --features audio-playback for native builds on macOS/Linux/Windows
+# Docker builds should NOT enable this feature (cpal's objc dependency doesn't compile on Linux)
+rodio = { version = "0.17", default-features = false, features = ["symphonia"], optional = true }
+
+# Fastembed - local embeddings via ONNX Runtime
+# Optional because Windows has CRT linking conflicts with ONNX Runtime
+# When disabled, users must use remote embedding APIs (OpenAI, Gemini, etc.)
+fastembed = { version = "5.3.1", optional = true }
+
+[dev-dependencies]
+tempfile = "3.10.1"
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
+serde_json = "1.0.117"
+once_cell = "1.19"
+regex = { version = "1.12", default-features = false, features = ["std"] }
+
+# Proprietary dev-dependencies - only available locally, not in Docker builds
+# Uncomment these for local development with API integration tests:
+# memvid-api = { path = "../../../proprietary/memvid-api" }
+# sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "macros", "uuid", "time"] }
+# axum = { version = "0.7", features = ["macros", "json"] }
+
+[[bin]]
+name = "memvid"
+path = "src/main.rs"

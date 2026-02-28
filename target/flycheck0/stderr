@@ -1,0 +1,7 @@
+error: rustc 1.88.0 is not supported by the following packages:
+  safe_arch@1.0.0 requires rustc 1.89
+  wide@1.1.1 requires rustc 1.89
+Either upgrade rustc or select compatible dependency versions with
+`cargo update <name>@<current-ver> --precise <compatible-ver>`
+where `<compatible-ver>` is the latest version supporting rustc 1.88.0
+
