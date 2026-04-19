@@ -1181,6 +1181,7 @@ pub fn handle_ask(config: &CliConfig, args: AskArgs) -> Result<()> {
             engine: memvid_core::SearchEngineKind::Hybrid,
             next_cursor: None,
             context: String::new(),
+            stale_index_skips: 0,
         };
 
         if let Err(e) = apply_cross_encoder_rerank(&mut search_response) {
@@ -1266,7 +1267,7 @@ pub fn handle_ask(config: &CliConfig, args: AskArgs) -> Result<()> {
             model_name,
             &response.question,
             &response.retrieval.context,
-            &response.retrieval.hits,
+            response.retrieval.hits.as_slice(),
             llm_context_override,
             None,
             args.system_prompt.as_deref(),
@@ -1631,6 +1632,7 @@ pub fn handle_find(config: &CliConfig, args: FindArgs) -> Result<()> {
             engine: SearchEngineKind::Hybrid, // Use Hybrid as placeholder
             next_cursor: None,
             context: String::new(),
+            stale_index_skips: 0,
         };
 
         if args.json_legacy {
@@ -1715,6 +1717,7 @@ pub fn handle_find(config: &CliConfig, args: FindArgs) -> Result<()> {
                         engine: SearchEngineKind::Hybrid,
                         next_cursor: None,
                         context: String::new(),
+                        stale_index_skips: 0,
                     };
                     apply_preference_rerank(&mut resp);
                     (
